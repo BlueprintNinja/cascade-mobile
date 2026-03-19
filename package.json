@@ -1,0 +1,66 @@
+{
+  "name": "cascade-mobile",
+  "displayName": "Cascade Mobile",
+  "description": "A Windsurf extension that bridges external applications to the Cascade AI agent via WebSocket.",
+  "version": "0.1.0",
+  "publisher": "cascade-mobile",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension",
+  "contributes": {
+    "commands": [
+      {
+        "command": "cascadeMobile.start",
+        "title": "Cascade Mobile: Start Server"
+      },
+      {
+        "command": "cascadeMobile.stop",
+        "title": "Cascade Mobile: Stop Server"
+      },
+      {
+        "command": "cascadeMobile.status",
+        "title": "Cascade Mobile: Show Status"
+      }
+    ],
+    "configuration": {
+      "title": "Cascade Mobile",
+      "properties": {
+        "cascadeMobile.port": {
+          "type": "number",
+          "default": 8080,
+          "description": "Port for the WebSocket ingress server."
+        },
+        "cascadeMobile.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start the WebSocket server when Windsurf launches."
+        },
+        "cascadeMobile.egressMode": {
+          "type": "string",
+          "enum": ["fileWatcher", "mcp"],
+          "default": "fileWatcher",
+          "description": "Method used to capture Cascade's response. 'fileWatcher' is simpler; 'mcp' requires MCP server setup."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "npx @vscode/vsce package"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.10",
+    "@vscode/vsce": "^2.24.0",
+    "typescript": "^5.3.0"
+  }
+}

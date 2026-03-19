@@ -1,134 +1,131 @@
-Blueprint: Building a Native Windsurf Cascade Connector
+# Cascade Mobile
 
-This plan outlines how to build a VS Code/Windsurf extension that acts as a bridge between an external application (your remote trigger) and the internal Cascade AI agent.     
+A Windsurf extension that bridges external applications to the [Cascade](https://windsurf.com) AI agent via WebSocket. Send prompts to Cascade from any tool — mobile apps, scripts, automations — and receive the responses over a persistent connection.
 
-By building an extension, we run inside Windsurf's Node.js environment, giving us access to internal commands and background processes without relying on OS-level UI hacking.
+## How It Works
 
-Architecture Overview
+The extension runs three components inside Windsurf's Node.js environment:
 
-The system will consist of three main components operating within the extension:
+- **Ingress** — A WebSocket server (`ws://localhost:8080` by default) that listens for incoming prompt requests from external clients.
+- **Actuator** — VS Code API calls that focus the Cascade panel, inject the prompt, and submit it programmatically.
+- **Egress** — A file system watcher that detects when Cascade writes its response to `.cascade_response.md` in the workspace, reads the content, sends it back over the WebSocket, and deletes the file.
 
-The Ingress (Local Server): A lightweight WebSocket or HTTP server running inside the extension that listens for incoming prompts from your external tools.
+```
+External Client ──── WebSocket ──── Extension ──── Cascade
+                                         │               │
+                                    File Watcher ◄── response file
+                                         │
+                              WebSocket response ────► External Client
+```
 
-The Actuator (Command Execution): VS Code API calls that programmatically focus the Cascade chat, inject the prompt, and execute it.
+## Requirements
 
-The Egress (MCP Server / Return Channel): A Model Context Protocol (MCP) tool registered by your extension that Cascade is instructed to call with its final answer, sending the data back to your local server.
+- [Windsurf](https://windsurf.com) (or VS Code `^1.85.0`)
+- Node.js 18+
 
-Phase 1: Extension Scaffolding & Setup
+## Installation
 
-Since Windsurf is a fork of VS Code, you build extensions for it the exact same way you build for VS Code using TypeScript.
+### From source
 
-Install Prerequisites: Ensure you have Node.js and Git installed.
+```bash
+npm install
+npm run package      # produces cascade-mobile-0.1.0.vsix
+```
 
-Install the Generator: Run npm install -g yo generator-code.
+In Windsurf, open the Extensions panel → `...` menu → **Install from VSIX** → select the `.vsix` file.
 
-Generate the Project: Run yo code in your terminal.
+### Development (Extension Development Host)
 
-Choose New Extension (TypeScript).
+Press `F5` in Windsurf/VS Code with this project open to launch a development host with the extension active.
 
-Name it cascade-remote-connector.
+## Usage
 
-Windsurf specific setup: In your package.json, under engines, ensure the vscode version matches the base version Windsurf uses (usually ^1.85.0 or similar).
+### Sending a prompt
 
-Phase 2: Building the Ingress (The Local Server)
+Connect a WebSocket client to `ws://localhost:8080` and send:
 
-Inside your src/extension.ts file, the activate function runs as soon as the IDE starts. We will use this to boot up a local server.
+```json
+{ "type": "execute_prompt", "prompt": "Refactor this function to use async/await" }
+```
 
-Install Dependencies: npm install ws (for WebSockets) or express. WebSockets are recommended for two-way, real-time communication.
+The extension injects the prompt into Cascade and instructs it to write its response to `.cascade_response.md`.
 
-Initialize Server in activate:
+### Receiving the response
 
-import * as vscode from 'vscode';
-import * as WebSocket from 'ws';
+When Cascade finishes and writes the response file, the extension sends back:
 
-export function activate(context: vscode.ExtensionContext) {
-    console.log('Cascade Connector is active!');
+```json
+{ "type": "response", "content": "..." }
+```
 
-    // Start a WebSocket server on a specific port (e.g., 8080)
-    const wss = new WebSocket.Server({ port: 8080 });
+On error:
 
-    wss.on('connection', function connection(ws) {
-        ws.on('message', async function incoming(message) {
-            const request = JSON.parse(message.toString());
-            if (request.type === 'execute_prompt') {
-                await triggerCascade(request.prompt);
-            }
-        });
-    });
+```json
+{ "type": "error", "message": "..." }
+```
 
-    // Clean up on deactivate
-    context.subscriptions.push({ dispose: () => wss.close() });
-}
+### Example client (Node.js)
 
+```js
+const WebSocket = require('ws');
+const ws = new WebSocket('ws://localhost:8080');
 
-Phase 3: The Actuator (Triggering Cascade)
+ws.on('open', () => {
+    ws.send(JSON.stringify({ type: 'execute_prompt', prompt: 'Write a Python hello world' }));
+});
 
-We need to programmatically pass the text to Cascade. Since internal APIs for direct silent AI querying are usually undocumented, we simulate the UI action using native VS Code commands.
+ws.on('message', (data) => {
+    const msg = JSON.parse(data);
+    if (msg.type === 'response') console.log(msg.content);
+});
+```
 
-Discover internal commands: In Windsurf, open Keyboard Shortcuts (Cmd+K Cmd+S) and search for "Cascade". Look for the Command IDs (e.g., workbench.panel.chat.view.windsurf.focus or similar).
+## Commands
 
-Execute the prompt:
+| Command | Description |
+|---|---|
+| `Cascade Mobile: Start Server` | Start the WebSocket ingress server |
+| `Cascade Mobile: Stop Server` | Stop the server |
+| `Cascade Mobile: Show Status` | Show current server and connection status |
 
-async function triggerCascade(prompt: string) {
-    // 1. Put prompt in the clipboard
-    await vscode.env.clipboard.writeText(prompt);
+## Configuration
 
-    // 2. Focus the Cascade input box (Replace with exact Windsurf command ID)
-    await vscode.commands.executeCommand('windsurf.cascade.focus');
+Settings are under `cascadeMobile.*` in VS Code/Windsurf settings:
 
-    // 3. Optional: Delay slightly to ensure UI is ready
-    await new Promise(resolve => setTimeout(resolve, 200));
+| Setting | Default | Description |
+|---|---|---|
+| `cascadeMobile.port` | `8080` | WebSocket server port |
+| `cascadeMobile.autoStart` | `true` | Start server automatically on launch |
+| `cascadeMobile.egressMode` | `fileWatcher` | Response capture method (`fileWatcher` or `mcp`) |
 
-    // 4. Paste the prompt and execute
-    await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
-    await vscode.commands.executeCommand('windsurf.cascade.submit'); // Or simulate 'Enter'
-}
+## Status Bar
 
+The status bar item (bottom-right) shows the current state:
 
-Phase 4: The Egress (Capturing the Response)
+- `$(circle-slash) Cascade Mobile` — server stopped
+- `$(plug) Cascade Mobile` — server running, no client connected
+- `$(radio-tower) Cascade Mobile` — server running, client connected
 
-This is where the Airlock extension gave us a major clue. Getting the response out of the chat UI is hard. Instead, we use the Model Context Protocol (MCP) or native file system watchers.
+## Project Structure
 
-Approach A: The MCP Tool (Highly Recommended)
+```
+cascade-mobile/
+├── src/
+│   └── extension.ts     # Extension entry point: server, actuator, file watcher
+├── package.json          # Extension manifest and dependencies
+├── tsconfig.json         # TypeScript configuration
+└── .vscodeignore         # Files excluded from the packaged .vsix
+```
 
-Windsurf supports MCP, which allows agents to use custom tools. Your extension can register an MCP tool called transmit_response_to_remote.
+## Packaging
 
-Register the Tool: In your extension, register a tool that takes a JSON payload containing the agent's answer.
+```bash
+npm run compile          # Compile TypeScript to out/
+npm run package          # Bundle into .vsix via @vscode/vsce
+```
 
-Inject the Instruction: When you receive a prompt via WebSocket, modify it before pasting it into Cascade:
+## Notes
 
-Original: "Write a Python function to..."
-
-Injected: "Write a Python function to... CRITICAL: Do not print the code in the chat. You MUST use the transmit_response_to_remote tool and pass your final code to it."
-
-Capture & Return: When Cascade calls your tool, your extension receives the payload natively. You then send that payload back through your open WebSocket connection to the remote user!
-
-Approach B: The Native File Watcher (Fallback)
-
-If setting up an MCP server is too complex initially, use the file-dump trick from the Python script, but do it entirely natively inside the extension.
-
-Inject Instruction: Tell Cascade to write to a specific .cascade_tmp.md file in the workspace.
-
-Watch the File: Use vscode.workspace.createFileSystemWatcher('**/.cascade_tmp.md').
-
-Read and Send: When the watcher detects the file is written, use vscode.workspace.fs.readFile to get the content, send it over the WebSocket, and then use vscode.workspace.fs.delete to clean it up.
-
-Phase 5: Packaging & Deployment
-
-Test locally: Press F5 in your development VS Code/Windsurf window to open an Extension Development Host.
-
-Package: Run npx vsce package. This generates a .vsix file.
-
-Install: In Windsurf, go to the Extensions panel, click the ... menu, and select Install from VSIX. Select your packaged file.
-
-Summary of the New Flow
-
-Your remote tool connects to ws://localhost:8080.
-
-It sends: {"type": "execute_prompt", "prompt": "Create a React button component"}.
-
-The Extension receives this, appends the MCP/File instructions, focuses the Cascade panel, pastes the text, and submits it.
-
-Cascade processes the request and, following its prompt instructions, uses your MCP tool to deliver the payload.
-
-The Extension receives the tool invocation and pushes the data back down the WebSocket to your remote tool.
+- The egress `fileWatcher` mode works by instructing Cascade (via a prompt injection) to write its response to `.cascade_response.md`. This file is automatically cleaned up after it is read.
+- Only one WebSocket client connection is active at a time; a new connection replaces the previous one.
+- Internal Windsurf command IDs (`windsurf.cascade.focus`, `windsurf.cascade.submit`) may change across Windsurf versions. The actuator tries multiple known IDs and falls back gracefully.
