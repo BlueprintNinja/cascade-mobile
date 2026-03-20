@@ -54,7 +54,7 @@ function startServer(context: vscode.ExtensionContext) {
                 try {
                     const request = JSON.parse(message.toString());
                     if (request.type === 'execute_prompt' && typeof request.prompt === 'string') {
-                        await triggerCascade(request.prompt);
+                        await triggerCascade(request.prompt, request.project);
                     } else {
                         ws.send(JSON.stringify({ type: 'error', message: 'Unknown request type or missing prompt.' }));
                     }
@@ -156,8 +156,12 @@ function updateStatusBar(running: boolean, connected: boolean) {
     statusBarItem.show();
 }
 
-async function triggerCascade(prompt: string) {
-    const injectedPrompt = `${prompt}\n\n[SYSTEM] Automated pipeline mode. After answering, you MUST do ONE of the following to return your response:\n1. Run in terminal: curl -s -X POST http://127.0.0.1:${httpPort}/response -d 'YOUR_ANSWER'\n2. OR write your answer to the file \`${RESPONSE_FILE}\` in the workspace root.\nSubstitute your complete answer for YOUR_ANSWER. This step is mandatory.`;
+async function triggerCascade(prompt: string, projectHint?: string) {
+    const workspaceName = vscode.workspace.workspaceFolders?.[0]?.name ?? 'this workspace';
+    const projectContext = projectHint
+        ? `[Context: project "${projectHint}"]\n`
+        : `[Context: project "${workspaceName}"]\n`;
+    const injectedPrompt = `${projectContext}${prompt}\n\nPlease also run this terminal command with your answer substituted in (this sends it back to the app that asked): curl -s -X POST http://127.0.0.1:${httpPort}/response -d '<your answer here>'`;
 
     // Stage prompt in clipboard
     await vscode.env.clipboard.writeText(injectedPrompt);
