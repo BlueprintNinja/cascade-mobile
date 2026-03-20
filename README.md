@@ -6,22 +6,23 @@ A Windsurf extension that bridges external applications to the [Cascade](https:/
 
 The extension runs three components inside Windsurf's Node.js environment:
 
-- **Ingress** — A WebSocket server (`ws://localhost:8080` by default) that listens for incoming prompt requests from external clients.
-- **Actuator** — VS Code API calls that focus the Cascade panel, inject the prompt, and submit it programmatically.
-- **Egress** — A file system watcher that detects when Cascade writes its response to `.cascade_response.md` in the workspace, reads the content, sends it back over the WebSocket, and deletes the file.
+- **Ingress** — A WebSocket server (`ws://localhost:8080`) that receives prompt requests from external clients.
+- **Actuator** — AppleScript activates Windsurf, presses `Cmd+Shift+I` to focus Cascade, and pastes the prompt via `Cmd+V`.
+- **Egress** — A lightweight HTTP server (`http://127.0.0.1:8081`) that Cascade POSTs its response to via `curl`. The extension forwards the content back over the WebSocket.
 
 ```
-External Client ──── WebSocket ──── Extension ──── Cascade
-                                         │               │
-                                    File Watcher ◄── response file
-                                         │
-                              WebSocket response ────► External Client
+External Client ─── WebSocket (8080) ─── Extension ─── Cascade (via AppleScript)
+                                              │               │
+                                   HTTP POST (8081) ◄── curl response
+                                              │
+                               WebSocket response ──────► External Client
 ```
 
 ## Requirements
 
-- [Windsurf](https://windsurf.com) (or VS Code `^1.85.0`)
+- [Windsurf](https://windsurf.com) (macOS, tested on Apple Silicon)
 - Node.js 18+
+- Windsurf must have **Accessibility permissions** (System Settings → Privacy & Security → Accessibility)
 
 ## Installation
 
@@ -106,15 +107,41 @@ The status bar item (bottom-right) shows the current state:
 - `$(plug) Cascade Mobile` — server running, no client connected
 - `$(radio-tower) Cascade Mobile` — server running, client connected
 
+## Mobile Web UI (Streamlit)
+
+A chat UI lives in `client/` — run it on your Mac and access it from your phone on the same network.
+
+### Setup
+
+```bash
+cd client
+pip install -r requirements.txt
+```
+
+### Run
+
+```bash
+streamlit run app.py
+```
+
+Then open `http://<your-mac-ip>:8501` on your phone (find your IP with `ipconfig getifaddr en0`).
+
+> The Streamlit server must be able to reach `ws://localhost:8080` — so it must run on the same machine as Windsurf.
+
 ## Project Structure
 
 ```
 cascade-mobile/
 ├── src/
-│   └── extension.ts     # Extension entry point: server, actuator, file watcher
-├── package.json          # Extension manifest and dependencies
-├── tsconfig.json         # TypeScript configuration
-└── .vscodeignore         # Files excluded from the packaged .vsix
+│   └── extension.ts          # Extension: WebSocket ingress, AppleScript actuator, HTTP egress
+├── client/
+│   ├── app.py                # Streamlit mobile chat UI
+│   ├── requirements.txt      # Python dependencies
+│   └── .streamlit/
+│       └── config.toml       # Dark theme + server config
+├── package.json              # Extension manifest and dependencies
+├── tsconfig.json             # TypeScript configuration
+└── .vscodeignore             # Files excluded from the packaged .vsix
 ```
 
 ## Packaging
@@ -126,6 +153,6 @@ npm run package          # Bundle into .vsix via @vscode/vsce
 
 ## Notes
 
-- The egress `fileWatcher` mode works by instructing Cascade (via a prompt injection) to write its response to `.cascade_response.md`. This file is automatically cleaned up after it is read.
+- Cascade must be in **Code mode** (agentic) for the curl egress to fire automatically. The file watcher is a fallback for Write mode.
 - Only one WebSocket client connection is active at a time; a new connection replaces the previous one.
-- Internal Windsurf command IDs (`windsurf.cascade.focus`, `windsurf.cascade.submit`) may change across Windsurf versions. The actuator tries multiple known IDs and falls back gracefully.
+- The actuator uses AppleScript (`Cmd+Shift+I`) to focus Cascade — Windsurf must have Accessibility permissions granted.
