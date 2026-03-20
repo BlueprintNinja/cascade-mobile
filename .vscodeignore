@@ -4,4 +4,6 @@ src/**
 .gitignore
 tsconfig.json
 **/*.map
-node_modules/**
+node_modules/.bin/**
+node_modules/**/test/**
+node_modules/**/tests/**

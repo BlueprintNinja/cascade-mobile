@@ -118,40 +118,29 @@ async function triggerCascade(prompt) {
     const injectedPrompt = responseFilePath
         ? `${prompt}\n\nCRITICAL INSTRUCTION: Write ONLY your final response to the file \`${RESPONSE_FILE}\` at the workspace root. Do not print your response in the chat.`
         : prompt;
-    await vscode.env.clipboard.writeText(injectedPrompt);
-    // Focus Cascade — try multiple known command IDs for compatibility
-    const focusCommands = [
-        'windsurf.cascade.focus',
-        'workbench.panel.chat.view.windsurf.focus',
-        'workbench.action.chat.open',
+    // Focus the Cascade panel — try known commands, swallow all failures
+    const focusCandidates = [
+        'workbench.action.focusAuxiliaryBar',
+        'workbench.action.focusSideBar',
+        'windsurf.openChatView',
+        'windsurf.cascadePanel',
     ];
-    for (const cmd of focusCommands) {
+    for (const cmd of focusCandidates) {
         try {
             await vscode.commands.executeCommand(cmd);
             break;
         }
         catch {
-            // try next
+            // try next candidate
         }
     }
-    await delay(300);
-    await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
+    // Wait for the Cascade input to fully gain focus
+    await delay(1000);
+    // Type the prompt directly into the focused Cascade input
+    await vscode.commands.executeCommand('type', { text: injectedPrompt });
     await delay(100);
-    // Submit — try multiple known command IDs
-    const submitCommands = [
-        'windsurf.cascade.submit',
-        'workbench.action.chat.submit',
-        'workbench.action.acceptSelectedQuickOpenItem',
-    ];
-    for (const cmd of submitCommands) {
-        try {
-            await vscode.commands.executeCommand(cmd);
-            break;
-        }
-        catch {
-            // try next
-        }
-    }
+    // Submit by sending a newline
+    await vscode.commands.executeCommand('type', { text: '\n' });
 }
 function setupFileWatcher(context) {
     fileWatcher = vscode.workspace.createFileSystemWatcher(`**/${RESPONSE_FILE}`);
