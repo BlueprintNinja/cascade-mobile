@@ -143,27 +143,10 @@ async function triggerCascade(prompt) {
     const injectedPrompt = `${prompt}\n\nIMPORTANT: After you have finished your answer, run this exact terminal command to return your response (replace YOUR_ANSWER with your full answer, keep the quotes):\ncurl -s -X POST http://127.0.0.1:${httpPort}/response -d 'YOUR_ANSWER'`;
     // Stage prompt in clipboard
     await vscode.env.clipboard.writeText(injectedPrompt);
-    // Focus the Cascade panel — try known commands, swallow all failures
-    const focusCandidates = [
-        'workbench.action.focusAuxiliaryBar',
-        'workbench.action.focusSideBar',
-        'windsurf.openChatView',
-        'windsurf.cascadePanel',
-    ];
-    for (const cmd of focusCandidates) {
-        try {
-            await vscode.commands.executeCommand(cmd);
-            break;
-        }
-        catch {
-            // try next candidate
-        }
-    }
-    // Wait for the Cascade WebView input to gain focus
-    await delay(800);
-    // Cascade's input is a WebView — the VS Code `type` command doesn't reach it.
-    // Use AppleScript to simulate Cmd+V (paste) then Enter (submit) at the OS level.
-    await pasteAndSubmitViaAppleScript();
+    // Use AppleScript to: activate Windsurf, open Cascade (Cmd+Shift+I), paste, submit.
+    // This bypasses VS Code focus commands entirely — reliable since the Cascade input
+    // is a WebView that doesn't accept the VS Code `type` command.
+    await focusCascadeAndSubmitViaAppleScript();
 }
 function setupFileWatcher(context) {
     fileWatcher = vscode.workspace.createFileSystemWatcher(`**/${RESPONSE_FILE}`);
@@ -188,12 +171,23 @@ async function handleResponseFile(uri) {
 function delay(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
-function pasteAndSubmitViaAppleScript() {
+function focusCascadeAndSubmitViaAppleScript() {
+    // 1. Activate Windsurf so it is the frontmost app
+    // 2. Press Cmd+Shift+I — this is windsurf.triggerCascade (opens/focuses Cascade)
+    // 3. Wait for the WebView input to be ready
+    // 4. Paste clipboard contents (Cmd+V)
+    // 5. Press Enter to submit
     const script = [
+        'tell application "Windsurf" to activate',
+        'delay 0.3',
         'tell application "System Events"',
-        '    keystroke "v" using {command down}',
-        '    delay 0.15',
-        '    key code 36',
+        '    tell process "Windsurf"',
+        '        keystroke "i" using {command down, shift down}',
+        '        delay 1.2',
+        '        keystroke "v" using {command down}',
+        '        delay 0.2',
+        '        key code 36',
+        '    end tell',
         'end tell',
     ].join('\n');
     return new Promise((resolve, reject) => {
