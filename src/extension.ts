@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as WebSocket from 'ws';
 import * as path from 'path';
+import { execFile } from 'child_process';
 
 const RESPONSE_FILE = '.cascade_response.md';
 
@@ -137,6 +138,9 @@ async function triggerCascade(prompt: string) {
         ? `${prompt}\n\nCRITICAL INSTRUCTION: Write ONLY your final response to the file \`${RESPONSE_FILE}\` at the workspace root. Do not print your response in the chat.`
         : prompt;
 
+    // Stage prompt in clipboard
+    await vscode.env.clipboard.writeText(injectedPrompt);
+
     // Focus the Cascade panel — try known commands, swallow all failures
     const focusCandidates = [
         'workbench.action.focusAuxiliaryBar',
@@ -153,15 +157,12 @@ async function triggerCascade(prompt: string) {
         }
     }
 
-    // Wait for the Cascade input to fully gain focus
-    await delay(1000);
+    // Wait for the Cascade WebView input to gain focus
+    await delay(800);
 
-    // Type the prompt directly into the focused Cascade input
-    await vscode.commands.executeCommand('type', { text: injectedPrompt });
-    await delay(100);
-
-    // Submit by sending a newline
-    await vscode.commands.executeCommand('type', { text: '\n' });
+    // Cascade's input is a WebView — the VS Code `type` command doesn't reach it.
+    // Use AppleScript to simulate Cmd+V (paste) then Enter (submit) at the OS level.
+    await pasteAndSubmitViaAppleScript();
 }
 
 function setupFileWatcher(context: vscode.ExtensionContext) {
@@ -190,6 +191,21 @@ async function handleResponseFile(uri: vscode.Uri) {
 
 function delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function pasteAndSubmitViaAppleScript(): Promise<void> {
+    const script = [
+        'tell application "System Events"',
+        '    keystroke "v" using {command down}',
+        '    delay 0.15',
+        '    key code 36',
+        'end tell',
+    ].join('\n');
+    return new Promise((resolve, reject) => {
+        execFile('osascript', ['-e', script], (err) => {
+            if (err) { reject(err); } else { resolve(); }
+        });
+    });
 }
 
 export function deactivate() {
