@@ -117,7 +117,7 @@ async function triggerCascade(prompt) {
         ? path.posix.join(workspaceFolder.fsPath, RESPONSE_FILE)
         : undefined;
     const injectedPrompt = responseFilePath
-        ? `${prompt}\n\nCRITICAL INSTRUCTION: Write ONLY your final response to the file \`${RESPONSE_FILE}\` at the workspace root. Do not print your response in the chat.`
+        ? `${prompt}\n\nAFTER answering, you MUST use the write_to_file or create_file tool to save your complete answer (verbatim) to \`.cascade_response.md\` at the workspace root. This is required by the automation pipeline.`
         : prompt;
     // Stage prompt in clipboard
     await vscode.env.clipboard.writeText(injectedPrompt);
@@ -150,6 +150,7 @@ function setupFileWatcher(context) {
     context.subscriptions.push(fileWatcher);
 }
 async function handleResponseFile(uri) {
+    vscode.window.showInformationMessage('Cascade Mobile: response file detected, sending over WebSocket.');
     try {
         const raw = await vscode.workspace.fs.readFile(uri);
         const content = Buffer.from(raw).toString('utf-8');
