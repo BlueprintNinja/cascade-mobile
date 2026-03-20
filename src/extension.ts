@@ -1,14 +1,16 @@
 import * as vscode from 'vscode';
 import * as WebSocket from 'ws';
-import * as path from 'path';
 import { execFile } from 'child_process';
+import * as http from 'http';
 
 const RESPONSE_FILE = '.cascade_response.md';
 
 let wss: WebSocket.Server | null = null;
+let httpServer: http.Server | null = null;
 let activeConnection: WebSocket | null = null;
 let fileWatcher: vscode.FileSystemWatcher | null = null;
 let statusBarItem: vscode.StatusBarItem;
+let httpPort = 8081;
 
 export function activate(context: vscode.ExtensionContext) {
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -25,6 +27,7 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     setupFileWatcher(context);
+    startHttpServer(context);
 
     if (autoStart) {
         startServer(context);
@@ -86,6 +89,29 @@ function startServer(context: vscode.ExtensionContext) {
     }
 }
 
+function startHttpServer(context: vscode.ExtensionContext) {
+    httpServer = http.createServer((req, res) => {
+        if (req.method === 'POST' && req.url === '/response') {
+            let body = '';
+            req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+            req.on('end', () => {
+                res.writeHead(200, { 'Content-Type': 'text/plain' });
+                res.end('ok');
+                if (activeConnection && activeConnection.readyState === WebSocket.OPEN) {
+                    activeConnection.send(JSON.stringify({ type: 'response', content: body }));
+                }
+            });
+        } else {
+            res.writeHead(404);
+            res.end();
+        }
+    });
+    httpServer.listen(httpPort, '127.0.0.1', () => {
+        console.log(`Cascade Mobile: HTTP response receiver on http://127.0.0.1:${httpPort}`);
+    });
+    context.subscriptions.push({ dispose: () => { httpServer?.close(); httpServer = null; } });
+}
+
 function stopServer() {
     if (!wss) {
         return;
@@ -96,6 +122,8 @@ function stopServer() {
         updateStatusBar(false, false);
         vscode.window.showInformationMessage('Cascade Mobile: Server stopped.');
     });
+    httpServer?.close();
+    httpServer = null;
 }
 
 function showStatus() {
@@ -129,14 +157,7 @@ function updateStatusBar(running: boolean, connected: boolean) {
 }
 
 async function triggerCascade(prompt: string) {
-    const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri;
-    const responseFilePath = workspaceFolder
-        ? path.posix.join(workspaceFolder.fsPath, RESPONSE_FILE)
-        : undefined;
-
-    const injectedPrompt = responseFilePath
-        ? `${prompt}\n\nAFTER answering, you MUST use the write_to_file or create_file tool to save your complete answer (verbatim) to \`.cascade_response.md\` at the workspace root. This is required by the automation pipeline.`
-        : prompt;
+    const injectedPrompt = `${prompt}\n\nIMPORTANT: After you have finished your answer, run this exact terminal command to return your response (replace YOUR_ANSWER with your full answer, keep the quotes):\ncurl -s -X POST http://127.0.0.1:${httpPort}/response -d 'YOUR_ANSWER'`;
 
     // Stage prompt in clipboard
     await vscode.env.clipboard.writeText(injectedPrompt);
